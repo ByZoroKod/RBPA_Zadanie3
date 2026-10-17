@@ -1,0 +1,791 @@
+@host = http://localhost:8080
+
+### 1.1 Пользователь: создать (201)
+POST {{host}}/api/users
+Content-Type: application/json
+
+{
+  "name": "Иван Продавцов",
+  "email": "seller-{{$timestamp}}@example.com"
+}
+
+> {%
+    client.test("201 и id", function () {
+        client.assert(response.status === 201, "ожидали 201, получили " + response.status);
+        client.assert(response.body.id > 0, "нет id");
+    });
+    client.global.set("sellerId", response.body.id);
+    client.global.set("sellerEmail", response.body.email);
+%}
+
+### 1.2 Пользователь: список (200)
+GET {{host}}/api/users
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.3 Пользователь: по id (200)
+GET {{host}}/api/users/{{sellerId}}
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.4 Пользователь: обновить (200)
+PATCH {{host}}/api/users/{{sellerId}}
+Content-Type: application/json
+
+{
+  "name": "Иван Продавцов-Старший"
+}
+
+> {%
+    client.test("200 и новое имя", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.name === "Иван Продавцов-Старший");
+    });
+%}
+
+### 1.5 Пользователь: несуществующий id (404)
+GET {{host}}/api/users/999999
+
+> {%
+    client.test("404", function () { client.assert(response.status === 404); });
+%}
+
+### 1.6 Пользователь: пустое имя (400)
+POST {{host}}/api/users
+Content-Type: application/json
+
+{
+  "name": "   "
+}
+
+> {%
+    client.test("400", function () { client.assert(response.status === 400); });
+%}
+
+### 1.7 Пользователь: повторный e-mail нарушает ограничение уникальности в БД (409)
+POST {{host}}/api/users
+Content-Type: application/json
+
+{
+  "name": "Двойник",
+  "email": "{{sellerEmail}}"
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 1.8 Предмет: создать (201)
+POST {{host}}/api/collectible-items
+Content-Type: application/json
+
+{
+  "description": "Серебряный рубль 1921 года",
+  "ownerId": {{sellerId}},
+  "condition": "хорошее"
+}
+
+> {%
+    client.test("201 и id", function () {
+        client.assert(response.status === 201);
+        client.assert(response.body.id > 0);
+    });
+    client.global.set("itemId", response.body.id);
+%}
+
+### 1.9 Предмет: список (200)
+GET {{host}}/api/collectible-items
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.10 Предмет: по id (200)
+GET {{host}}/api/collectible-items/{{itemId}}
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.11 Предмет: обновить (200)
+PATCH {{host}}/api/collectible-items/{{itemId}}
+Content-Type: application/json
+
+{
+  "condition": "отличное"
+}
+
+> {%
+    client.test("200 и новое состояние", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.condition === "отличное");
+    });
+%}
+
+### 1.12 Предмет: владелец не существует, внешний ключ не даёт создать запись (400)
+POST {{host}}/api/collectible-items
+Content-Type: application/json
+
+{
+  "description": "Предмет без владельца",
+  "ownerId": 999999
+}
+
+> {%
+    client.test("400", function () { client.assert(response.status === 400); });
+%}
+
+### 1.13 Лот: создать обычным CRUD (201)
+< {%
+    request.variables.set("crudEnd", new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/auction-lots
+Content-Type: application/json
+
+{
+  "itemId": {{itemId}},
+  "startPrice": 100,
+  "step": 10,
+  "endTime": "{{crudEnd}}"
+}
+
+> {%
+    client.test("201, статус ACTIVE", function () {
+        client.assert(response.status === 201);
+        client.assert(response.body.status === "ACTIVE");
+    });
+    client.global.set("crudLotId", response.body.id);
+%}
+
+### 1.14 Лот: список (200)
+GET {{host}}/api/auction-lots
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.15 Лот: по id (200)
+GET {{host}}/api/auction-lots/{{crudLotId}}
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.16 Лот: обновить шаг (200)
+PATCH {{host}}/api/auction-lots/{{crudLotId}}
+Content-Type: application/json
+
+{
+  "step": 25
+}
+
+> {%
+    client.test("200 и новый шаг", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.step === 25);
+    });
+%}
+
+### 1.17 Лот: второй активный лот на тот же предмет запрещён ограничением БД (409)
+< {%
+    request.variables.set("crudEnd", new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/auction-lots
+Content-Type: application/json
+
+{
+  "itemId": {{itemId}},
+  "startPrice": 100,
+  "step": 10,
+  "endTime": "{{crudEnd}}"
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 1.18 Лот: цена с тремя знаками после запятой (400)
+< {%
+    request.variables.set("crudEnd", new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/auction-lots
+Content-Type: application/json
+
+{
+  "itemId": {{itemId}},
+  "startPrice": 100.555,
+  "step": 10,
+  "endTime": "{{crudEnd}}"
+}
+
+> {%
+    client.test("400", function () { client.assert(response.status === 400); });
+%}
+
+### 1.19 Покупатель A (нужен для ставок)
+POST {{host}}/api/users
+Content-Type: application/json
+
+{
+  "name": "Мария Покупателева",
+  "email": "buyer-a-{{$timestamp}}@example.com"
+}
+
+> {%
+    client.test("201", function () { client.assert(response.status === 201); });
+    client.global.set("buyerAId", response.body.id);
+%}
+
+### 1.20 Покупатель B
+POST {{host}}/api/users
+Content-Type: application/json
+
+{
+  "name": "Алексей Покупателев",
+  "email": "buyer-b-{{$timestamp}}@example.com"
+}
+
+> {%
+    client.test("201", function () { client.assert(response.status === 201); });
+    client.global.set("buyerBId", response.body.id);
+%}
+
+### 1.21 Ставка: создать (201). Время ставки проставляет сервер
+POST {{host}}/api/bids
+Content-Type: application/json
+
+{
+  "lotId": {{crudLotId}},
+  "bidderId": {{buyerAId}},
+  "amount": 100
+}
+
+> {%
+    client.test("201, время задано сервером", function () {
+        client.assert(response.status === 201);
+        client.assert(response.body.time !== undefined);
+    });
+    client.global.set("crudBidId", response.body.id);
+%}
+
+### 1.22 Ставка: список (200)
+GET {{host}}/api/bids
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.23 Ставка: по id (200)
+GET {{host}}/api/bids/{{crudBidId}}
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.24 Ставка: слишком маленькая сумма (409)
+POST {{host}}/api/bids
+Content-Type: application/json
+
+{
+  "lotId": {{crudLotId}},
+  "bidderId": {{buyerBId}},
+  "amount": 5
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 1.25 Сделка: создать обычным CRUD (201). Сумма берётся из выигравшей ставки
+POST {{host}}/api/auction-deals
+Content-Type: application/json
+
+{
+  "lotId": {{crudLotId}},
+  "winningBidId": {{crudBidId}}
+}
+
+> {%
+    client.test("201, статус PENDING, сумма 100", function () {
+        client.assert(response.status === 201);
+        client.assert(response.body.transferStatus === "PENDING");
+        client.assert(response.body.amount === 100);
+    });
+    client.global.set("crudDealId", response.body.id);
+%}
+
+### 1.26 Сделка: список (200)
+GET {{host}}/api/auction-deals
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.27 Сделка: по id (200)
+GET {{host}}/api/auction-deals/{{crudDealId}}
+
+> {%
+    client.test("200", function () { client.assert(response.status === 200); });
+%}
+
+### 1.28 Сделка: обновить статус (200)
+PATCH {{host}}/api/auction-deals/{{crudDealId}}
+Content-Type: application/json
+
+{
+  "transferStatus": "CANCELLED"
+}
+
+> {%
+    client.test("200", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.transferStatus === "CANCELLED");
+    });
+%}
+
+### 1.29 Сделка: изменить сумму выигравшей ставки нельзя, пока на неё ссылается сделка (409)
+PATCH {{host}}/api/bids/{{crudBidId}}
+Content-Type: application/json
+
+{
+  "amount": 500
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 1.30 Каскад: удалить предмет, вместе с ним исчезают лот, ставка и сделка (204)
+DELETE {{host}}/api/collectible-items/{{itemId}}
+
+> {%
+    client.test("204", function () { client.assert(response.status === 204); });
+%}
+
+### 1.31 Каскад: лот удалён (404)
+GET {{host}}/api/auction-lots/{{crudLotId}}
+
+> {%
+    client.test("404", function () { client.assert(response.status === 404); });
+%}
+
+### 1.32 Каскад: ставка удалена (404)
+GET {{host}}/api/bids/{{crudBidId}}
+
+> {%
+    client.test("404", function () { client.assert(response.status === 404); });
+%}
+
+### 1.33 Каскад: сделка удалена (404)
+GET {{host}}/api/auction-deals/{{crudDealId}}
+
+> {%
+    client.test("404", function () { client.assert(response.status === 404); });
+%}
+
+### 2.1 Новый предмет у продавца
+POST {{host}}/api/collectible-items
+Content-Type: application/json
+
+{
+  "description": "Карманные часы Павел Буре, 1900-е",
+  "ownerId": {{sellerId}},
+  "condition": "требуют обслуживания"
+}
+
+> {%
+    client.test("201", function () { client.assert(response.status === 201); });
+    client.global.set("watchId", response.body.id);
+%}
+
+### 2.2 ОПЕРАЦИЯ 1. Выставить предмет на торги (201, лот ACTIVE)
+< {%
+    request.variables.set("lotEnd", new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/collectible-items/{{watchId}}/list-for-auction
+Content-Type: application/json
+
+{
+  "startPrice": 1000,
+  "step": 100,
+  "endTime": "{{lotEnd}}"
+}
+
+> {%
+    client.test("201, лот активен, начало задано сервером", function () {
+        client.assert(response.status === 201);
+        client.assert(response.body.status === "ACTIVE");
+        client.assert(response.body.startTime !== undefined);
+    });
+    client.global.set("lotId", response.body.id);
+%}
+
+### 2.3 Операция 1 повторно: предмет уже торгуется (409)
+< {%
+    request.variables.set("lotEnd", new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/collectible-items/{{watchId}}/list-for-auction
+Content-Type: application/json
+
+{
+  "startPrice": 1000,
+  "step": 100,
+  "endTime": "{{lotEnd}}"
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.4 Операция 1 с прошедшей датой окончания (400)
+POST {{host}}/api/collectible-items/{{watchId}}/list-for-auction
+Content-Type: application/json
+
+{
+  "startPrice": 1000,
+  "step": 100,
+  "endTime": "2020-01-01T00:00:00Z"
+}
+
+> {%
+    client.test("400", function () { client.assert(response.status === 400); });
+%}
+
+### 2.5 ОПЕРАЦИЯ 2. Ставка владельца на свой предмет запрещена (409)
+POST {{host}}/api/auction-lots/{{lotId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{sellerId}},
+  "amount": 1000
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.6 Операция 2: ставка ниже стартовой цены (409)
+POST {{host}}/api/auction-lots/{{lotId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{buyerAId}},
+  "amount": 999
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.7 Операция 2: первая ставка покупателя A, 1000 (201)
+POST {{host}}/api/auction-lots/{{lotId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{buyerAId}},
+  "amount": 1000
+}
+
+> {%
+    client.test("201", function () {
+        client.assert(response.status === 201);
+        client.assert(response.body.time !== undefined);
+    });
+%}
+
+### 2.8 Операция 2: лидер не может перебивать сам себя (409)
+POST {{host}}/api/auction-lots/{{lotId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{buyerAId}},
+  "amount": 1500
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.9 Операция 2: покупатель B даёт меньше, чем лидер + шаг (409)
+POST {{host}}/api/auction-lots/{{lotId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{buyerBId}},
+  "amount": 1050
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.10 Операция 2: покупатель B перебивает на шаг, 1100 (201)
+POST {{host}}/api/auction-lots/{{lotId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{buyerBId}},
+  "amount": 1100
+}
+
+> {%
+    client.test("201", function () { client.assert(response.status === 201); });
+%}
+
+### 2.11 Операция 2: покупатель A возвращает лидерство, 1300 (201)
+POST {{host}}/api/auction-lots/{{lotId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{buyerAId}},
+  "amount": 1300
+}
+
+> {%
+    client.test("201", function () { client.assert(response.status === 201); });
+%}
+
+### 2.12 ОПЕРАЦИЯ 3. Завершить торги: побеждает A со ставкой 1300 (200, сделка PENDING, лот FINISHED)
+POST {{host}}/api/auction-lots/{{lotId}}/close
+
+> {%
+    client.test("200, сделка на 1300, лот FINISHED", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.lot.status === "FINISHED");
+        client.assert(response.body.deal.amount === 1300);
+        client.assert(response.body.deal.transferStatus === "PENDING");
+    });
+    client.global.set("dealId", response.body.deal.id);
+%}
+
+### 2.13 Операция 3 повторно: лот уже закрыт (409)
+POST {{host}}/api/auction-lots/{{lotId}}/close
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.14 Операция 2 после закрытия: ставки больше не принимаются (409)
+POST {{host}}/api/auction-lots/{{lotId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{buyerBId}},
+  "amount": 5000
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.15 Операция 1: предмет продан и ждёт передачи, выставить заново нельзя (409)
+< {%
+    request.variables.set("lotEnd", new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/collectible-items/{{watchId}}/list-for-auction
+Content-Type: application/json
+
+{
+  "startPrice": 1000,
+  "step": 100,
+  "endTime": "{{lotEnd}}"
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.16 До передачи владелец предмета прежний - продавец
+GET {{host}}/api/collectible-items/{{watchId}}
+
+> {%
+    client.test("владелец - продавец", function () {
+        client.assert(response.body.ownerId === client.global.get("sellerId"));
+    });
+%}
+
+### 2.17 ОПЕРАЦИЯ 4. Подтвердить передачу: владельцем становится победитель A (200, TRANSFERRED)
+POST {{host}}/api/auction-deals/{{dealId}}/confirm-transfer
+
+> {%
+    client.test("200, TRANSFERRED", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.transferStatus === "TRANSFERRED");
+    });
+%}
+
+### 2.18 После передачи владелец предмета - покупатель A
+GET {{host}}/api/collectible-items/{{watchId}}
+
+> {%
+    client.test("владелец - покупатель A", function () {
+        client.assert(response.body.ownerId === client.global.get("buyerAId"));
+    });
+%}
+
+### 2.19 Операция 4 повторно: сделка уже передана (409)
+POST {{host}}/api/auction-deals/{{dealId}}/confirm-transfer
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.20 Операция 5: отменить уже переданную сделку нельзя (409)
+POST {{host}}/api/auction-deals/{{dealId}}/cancel
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.21 Новый владелец (A) может выставить предмет снова (201)
+< {%
+    request.variables.set("lotEnd", new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/collectible-items/{{watchId}}/list-for-auction
+Content-Type: application/json
+
+{
+  "startPrice": 2000,
+  "step": 200,
+  "endTime": "{{lotEnd}}"
+}
+
+> {%
+    client.test("201", function () { client.assert(response.status === 201); });
+    client.global.set("relistId", response.body.id);
+%}
+
+### 2.22 Прежний владелец (продавец) теперь может ставить на этот предмет (201)
+POST {{host}}/api/auction-lots/{{relistId}}/place-bid
+Content-Type: application/json
+
+{
+  "bidderId": {{sellerId}},
+  "amount": 2000
+}
+
+> {%
+    client.test("201", function () { client.assert(response.status === 201); });
+%}
+
+### 2.23 Операция 1: по предмету уже идут торги (лот из 2.21), выставить повторно нельзя (409)
+< {%
+    request.variables.set("lotEnd", new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/collectible-items/{{watchId}}/list-for-auction
+Content-Type: application/json
+
+{
+  "startPrice": 1,
+  "step": 1,
+  "endTime": "{{lotEnd}}"
+}
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.24 Завершить торги по лоту 2.21: лидирует продавец со ставкой 2000 (200)
+POST {{host}}/api/auction-lots/{{relistId}}/close
+
+> {%
+    client.test("200, новая сделка", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.deal.amount === 2000);
+    });
+    client.global.set("dealId2", response.body.deal.id);
+%}
+
+### 2.25 ОПЕРАЦИЯ 5. Отменить сделку: торги не состоялись, предмет остаётся у владельца (200, CANCELLED)
+POST {{host}}/api/auction-deals/{{dealId2}}/cancel
+
+> {%
+    client.test("200, CANCELLED", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.transferStatus === "CANCELLED");
+    });
+%}
+
+### 2.26 После отмены лот получил статус CANCELLED
+GET {{host}}/api/auction-lots/{{relistId}}
+
+> {%
+    client.test("CANCELLED", function () { client.assert(response.body.status === "CANCELLED"); });
+%}
+
+### 2.27 Предмет остался у покупателя A
+GET {{host}}/api/collectible-items/{{watchId}}
+
+> {%
+    client.test("владелец - покупатель A", function () {
+        client.assert(response.body.ownerId === client.global.get("buyerAId"));
+    });
+%}
+
+### 2.28 Операция 5 повторно: сделка уже отменена (409)
+POST {{host}}/api/auction-deals/{{dealId2}}/cancel
+
+> {%
+    client.test("409", function () { client.assert(response.status === 409); });
+%}
+
+### 2.29 Операция 3 без ставок: выставляем снова и закрываем (лот CANCELLED, сделки нет)
+< {%
+    request.variables.set("lotEnd", new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString());
+%}
+POST {{host}}/api/collectible-items/{{watchId}}/list-for-auction
+Content-Type: application/json
+
+{
+  "startPrice": 300,
+  "step": 10,
+  "endTime": "{{lotEnd}}"
+}
+
+> {%
+    client.test("201", function () { client.assert(response.status === 201); });
+    client.global.set("emptyLotId", response.body.id);
+%}
+
+### 2.30 Закрыть лот без ставок (200, CANCELLED, поля deal нет)
+POST {{host}}/api/auction-lots/{{emptyLotId}}/close
+
+> {%
+    client.test("200, CANCELLED, без сделки", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.lot.status === "CANCELLED");
+        client.assert(response.body.deal === undefined);
+    });
+%}
+
+### 3.1 Удалить продавца
+DELETE {{host}}/api/users/{{sellerId}}
+
+> {%
+    client.test("204", function () { client.assert(response.status === 204); });
+%}
+
+### 3.2 Удалить покупателя A (вместе с ним удаляется предмет и всё, что с ним связано)
+DELETE {{host}}/api/users/{{buyerAId}}
+
+> {%
+    client.test("204", function () { client.assert(response.status === 204); });
+%}
+
+### 3.3 Удалить покупателя B
+DELETE {{host}}/api/users/{{buyerBId}}
+
+> {%
+    client.test("204", function () { client.assert(response.status === 204); });
+%}
+
+### 3.4 Предмет сценария удалён каскадом (404)
+GET {{host}}/api/collectible-items/{{watchId}}
+
+> {%
+    client.test("404", function () { client.assert(response.status === 404); });
+%}
